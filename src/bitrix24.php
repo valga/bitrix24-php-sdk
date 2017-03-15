@@ -146,6 +146,22 @@ class Bitrix24 implements iBitrix24
     protected $_batch = array();
 
     /**
+     * @var callable callback for expired tokens
+     */
+    protected $_onExpiredToken;
+
+    /**
+     * Set function called on token expiration. Callback receives instance as first parameter.
+     * If callback returns true, API call will be retried.
+     *
+     * @param callable $callback
+     */
+    public function setOnExpiredToken(callable $callback)
+    {
+        $this->_onExpiredToken = $callback;
+    }
+
+    /**
      * Create a object to work with Bitrix24 REST API service
      *
      * @param bool $isSaveRawResponse - if true raw response from bitrix24 will be available from method getRawResponse, this is debug mode
@@ -622,7 +638,7 @@ class Bitrix24 implements iBitrix24
      *
      * @return array
      */
-    public function call($methodName, array $additionalParameters = array())
+    protected function _call($methodName, array $additionalParameters = array())
     {
 //		$arAuthServerMethods = array(
 //			'app.info',
@@ -706,6 +722,45 @@ class Bitrix24 implements iBitrix24
             }
         }
         return $requestResult;
+    }
+
+    /**
+     * Execute Bitrix24 REST API method
+     *
+     * @param string $methodName
+     * @param array $additionalParameters
+     *
+     * @throws Bitrix24Exception
+     * @throws Bitrix24ApiException
+     * @throws Bitrix24TokenIsInvalidException
+     * @throws Bitrix24TokenIsExpiredException
+     * @throws Bitrix24WrongClientException
+     * @throws Bitrix24MethodNotFoundException
+     * @throws Bitrix24PaymentRequiredException
+     * @throws Bitrix24SecurityException
+     * @throws Bitrix24PortalDeletedException
+     * @throws Bitrix24IoException
+     * @throws Bitrix24EmptyResponseException
+     *
+     * @return array
+     */
+    public function call($methodName, array $additionalParameters = array())
+    {
+        try {
+            $result = $this->_call($methodName, $additionalParameters);
+        } catch (Bitrix24TokenIsExpiredException $e) {
+            if (!is_callable($this->_onExpiredToken)) {
+                throw $e;
+            }
+
+            $retry = call_user_func($this->_onExpiredToken, $this);
+            if (!$retry) {
+                throw $e;
+            }
+            $result = $this->_call($methodName, $additionalParameters);
+        }
+        
+        return $result;
     }
 
     /**
